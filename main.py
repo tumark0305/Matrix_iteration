@@ -8,6 +8,7 @@ from kivy.core.text import LabelBase
 from kivy.core.window import Window
 from kivy.uix.anchorlayout import AnchorLayout
 import numpy as np
+from scipy import ndimage
 
 LabelBase.register(name='chinese', fn_regular='C:\\Windows\\Fonts\\msjh.ttc')
 class EDA_method:
@@ -33,7 +34,8 @@ class EDA_method:
         [self.size_list.append([_block_size_x[_idx],_block_size_y[_idx]]) for _idx in range(self.block_count)]
         self.coordinate_list = np.array(self.coordinate_list, dtype=np.uint8)
         self.size_list = np.array(self.size_list, dtype=np.uint8)
-        self.all_matrix.append(self.convert_tomatrix())
+        self.matrix = self.convert_tomatrix()
+        self.all_matrix.append(self.matrix)
         
         return None
     def convert_tomatrix(self):
@@ -60,11 +62,19 @@ class EDA_method:
             _overlap = not np.any(self.matrix >= 2)
                 
             return all([_L,_R,_T,_B,_overlap])
+        def grade():
+            _max_value = np.max(self.matrix)
+            _max_mask = (self.matrix == _max_value)
+            _labeled_array, _num_features = ndimage.label(_max_mask)
+            _max_centroids = ndimage.center_of_mass(_max_mask, _labeled_array, range(1, _num_features + 1))
+            
+            return None
         _sep_coordinate = np.transpose(self.coordinate_list)
         _HPWL = (max(_sep_coordinate[0]) - min(_sep_coordinate[0]) + max(_sep_coordinate[1]) - min(_sep_coordinate[1]))/2
         _feasible = feasible()
         self.HPWL_list.append(_HPWL)
         self.feasible_list.append(_feasible)
+        grade()
         self.data_pack.append([_HPWL,_feasible])
         return None
     def forward(self):
