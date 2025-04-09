@@ -67,7 +67,13 @@ class EDA_method:
             _max_mask = (self.matrix == _max_value)
             _labeled_array, _num_features = ndimage.label(_max_mask)
             _max_centroids = ndimage.center_of_mass(_max_mask, _labeled_array, range(1, _num_features + 1))
-            
+            _zero_mask = (self.matrix == 0)
+            _labeled_array, _num_features = ndimage.label(_zero_mask)
+            _zero_centroids = ndimage.center_of_mass(_zero_mask, _labeled_array, range(1, _num_features + 1))
+            if len(_zero_centroids) <= 1:
+                pass#single
+            else:
+                pass #bi
             return None
         _sep_coordinate = np.transpose(self.coordinate_list)
         _HPWL = (max(_sep_coordinate[0]) - min(_sep_coordinate[0]) + max(_sep_coordinate[1]) - min(_sep_coordinate[1]))/2
