@@ -12,6 +12,7 @@ from scipy import ndimage
 
 LabelBase.register(name='chinese', fn_regular='C:\\Windows\\Fonts\\msjh.ttc')
 class EDA_method:
+    max_block_size = 8
     def __init__(self):
         self.col, self.row = 10,15
         self.matrix = None
@@ -23,19 +24,19 @@ class EDA_method:
         self.size_list = []
         self.HPWL_list = []
         self.feasible_list = []
+        self.all_coordinate_list = []
     def load_random_matrix(self):
         _raw_mat = np.random.randint(0, 100, size=(self.col, self.row), dtype=np.uint8)
         _top_indices = np.unravel_index(np.argsort(_raw_mat, axis=None)[-self.block_count:], _raw_mat.shape)
-        _block_size_x = np.random.randint(1, 4, size=(len(_top_indices[0])), dtype=np.uint8)
+        _block_size_x = np.random.randint(1, self.max_block_size, size=(len(_top_indices[0])), dtype=np.uint8)
         _block_size_y = _block_size_x.copy()[:len(_top_indices[0])-self.nonsquare_count]
-        _block_size_y = np.concatenate((_block_size_y, np.random.randint(1, 4, size=(self.nonsquare_count), dtype=np.uint8)))
+        _block_size_y = np.concatenate((_block_size_y, np.random.randint(1, self.max_block_size, size=(self.nonsquare_count), dtype=np.uint8)))
         
         [self.coordinate_list.append([_top_indices[0][_idx],_top_indices[1][_idx]]) for _idx in range(self.block_count)]
         [self.size_list.append([_block_size_x[_idx],_block_size_y[_idx]]) for _idx in range(self.block_count)]
         self.coordinate_list = np.array(self.coordinate_list, dtype=np.uint8)
         self.size_list = np.array(self.size_list, dtype=np.uint8)
-        self.matrix = self.convert_tomatrix()
-        self.all_matrix.append(self.matrix)
+        self.all_coordinate_list.append(self.coordinate_list.copy())
         
         return None
     def convert_tomatrix(self):
@@ -43,7 +44,7 @@ class EDA_method:
         for _y in range(len(_output)):
             for _x in range(len(_output[_y])):
                 for _block_idx,_coordinate in enumerate(self.coordinate_list):
-                    if abs(_coordinate[0] - _x) <=self.size_list[_block_idx][0] and abs(_coordinate[1] - _y) <self.size_list[_block_idx][1]:
+                    if 0 <= _x - _coordinate[0]  <self.size_list[_block_idx][0] and 0 <= _y - _coordinate[1] <self.size_list[_block_idx][1]:
                         _output[_y][_x] +=1
         return _output
     def loss(self):
@@ -52,9 +53,9 @@ class EDA_method:
             _all_y = []
             for _idx in range(self.block_count):
                 _all_x.append(self.coordinate_list[_idx][0] + self.size_list[_idx][0])
-                _all_x.append(self.coordinate_list[_idx][0] - self.size_list[_idx][0])
+                _all_x.append(self.coordinate_list[_idx][0])
                 _all_y.append(self.coordinate_list[_idx][1] + self.size_list[_idx][1])
-                _all_y.append(self.coordinate_list[_idx][1] - self.size_list[_idx][1])
+                _all_y.append(self.coordinate_list[_idx][1])
             _L = min(_all_x) >= 0
             _R = max(_all_x) < self.row
             _B = min(_all_y) >=0
@@ -62,7 +63,7 @@ class EDA_method:
             _overlap = not np.any(self.matrix >= 2)
                 
             return all([_L,_R,_T,_B,_overlap])
-        def grade():
+        def field_grade():
             _max_value = np.max(self.matrix)
             _max_mask = (self.matrix == _max_value)
             _labeled_array, _num_features = ndimage.label(_max_mask)
@@ -75,21 +76,53 @@ class EDA_method:
             else:
                 pass #bi
             return None
-        _sep_coordinate = np.transpose(self.coordinate_list)
-        _HPWL = (max(_sep_coordinate[0]) - min(_sep_coordinate[0]) + max(_sep_coordinate[1]) - min(_sep_coordinate[1]))/2
+        def fast_method():
+            _sep_coordinate = np.transpose(self.coordinate_list)
+            _order = np.argsort(_sep_coordinate[0])
+            _e0 = 1
+            _sub_sum0 = 0
+            for _idx0 in range(1,len(_order)):
+                _sub_sum1 = 0
+                for _idx1 in range(1,_idx0):
+                    _sub_sum1 += self.size_list[_order[_idx1]][0]
+                _sub_sum0 += _e0 * (_sep_coordinate[0][_order[_idx0]] - _sub_sum1)
+            _sub_sum0 += _e0 * _sep_coordinate[0][_order[0]]
+            _sub_sum3 = _e0 * len(_order)
+            _x0 = int(_sub_sum0 / _sub_sum3)
+            if _x0 <0:
+                _x0 = 0
+            _coordinate_list = self.coordinate_list.copy()
+            _xn = _x0
+            for _order_idx in _order:
+                _cell = [_xn,_sep_coordinate[1][_order_idx]]
+                _coordinate_list[_order_idx] = _cell
+                _xn += self.size_list[_order_idx][0]
+            self.coordinate_list = np.array(_coordinate_list, dtype=np.uint8)
+            self.all_coordinate_list.append(self.coordinate_list.copy())
+
+            return None
+        def HPWL()->float:
+            _sep_coordinate = np.transpose(self.coordinate_list)
+            _output = (max(_sep_coordinate[0]) - min(_sep_coordinate[0]) + max(_sep_coordinate[1]) - min(_sep_coordinate[1]))/2
+            return _output
+        
         _feasible = feasible()
+        _HPWL = HPWL()
+        _orig_coord = self.coordinate_list.copy()
         self.HPWL_list.append(_HPWL)
         self.feasible_list.append(_feasible)
-        grade()
-        self.data_pack.append([_HPWL,_feasible])
+        field_grade()
+        fast_method()
+        self.data_pack.append([_HPWL,_feasible,_orig_coord])
         return None
     def forward(self):
+        self.matrix = self.convert_tomatrix()
+        self.all_matrix.append(self.matrix.copy())
+
         self.loss()
-        for i in range(5):
-            self.coordinate_list += 1
-            self.matrix = self.convert_tomatrix()
-            self.loss()
-            self.all_matrix.append(self.matrix)
+        self.matrix = self.convert_tomatrix()
+        self.all_matrix.append(self.matrix.copy())
+        self.loss()
         return None
 
 class MatrixIterationVisualize(App):
