@@ -13,7 +13,7 @@ from tqdm import trange
 
 LabelBase.register(name='chinese', fn_regular='C:\\Windows\\Fonts\\msjh.ttc')
 class EDA_method:
-    max_block_size = 8
+    max_block_size = 6
     def __init__(self):
         self.col, self.row = 15,20
         self.matrix = None
@@ -68,9 +68,9 @@ class EDA_method:
                 _all_y.append(self.coordinate_list[_idx][1] + self.size_list[_idx][1])
                 _all_y.append(self.coordinate_list[_idx][1])
             _L = min(_all_x) >= 0
-            _R = max(_all_x) < self.row
+            _R = max(_all_x) <= self.row
             _B = min(_all_y) >=0
-            _T = max(_all_y) < self.col
+            _T = max(_all_y) <= self.col
             _overlap = not np.any(self.matrix >= 2)
                 
             return all([_L,_R,_T,_B,_overlap])
@@ -194,6 +194,35 @@ class EDA_method:
             _result = np.abs(_diff).sum()
             return _result
         def spring_method():
+            def block_affect_byfield():
+                _zero_mask = (self.matrix == 0)
+                _labeled_array, _num_features = ndimage.label(_zero_mask)
+                _zero_centroids = ndimage.center_of_mass(_zero_mask, _labeled_array, range(1, _num_features + 1))
+                if len(_zero_centroids) >= 2:
+                    _output = np.zeros((self.col, self.row, 2), dtype=np.float32)
+                    _neg_charge = _output.copy()
+                    _neg = _zero_centroids[0]
+                    _neg_array = np.array(_neg)
+                    for _y in range(self.col):
+                        for _x in range(self.row):
+                            _diff = _neg_array - np.array([_x, _y])
+                            _r2 = np.sum(_diff ** 2)
+                            if _r2 != 0:
+                                _r = np.sqrt(_r2)
+                                _neg_charge[_y][_x] += (_diff / _r) * (1 / _r)
+                    _result = (np.ceil(np.abs(_neg_charge)) * np.sign(_neg_charge)).astype(np.int32) 
+                    _force = np.zeros((self.block_count, 2), dtype=np.int32)
+                    for _idx in range(self.block_count):
+                        _xcoord = np.clip(self.coordinate_list[_idx][0],0,self.row-1)
+                        _ycoord = np.clip(self.coordinate_list[_idx][1],0,self.col-1)
+                        _force[_idx] = _result[_ycoord][_xcoord]
+                else:
+                    _force = np.zeros((self.block_count, 2), dtype=np.int32)
+                for _block in range(self.block_count):
+                    if np.array_equal(_sum_force[_block], [0, 0]) :
+                        _force[_block] = np.array([0, 0])
+                _force = np.array(_force, dtype=np.int32)
+                return _force
             _coordinate = self.coordinate_list.astype(np.int32)
             _size = self.size_list.astype(np.int32)
             def cal_block_force():
@@ -206,13 +235,29 @@ class EDA_method:
                         if _overlap[0]>0 and _overlap[1]>0:
                             _overlap = np.array(_overlap,dtype = np.int32)
                             _spring_force = np.clip(np.ceil(_overlap/2),0,None).astype(np.int32)
-                            _sum_force[_blocka] += _spring_force
-                            _sum_force[_blockb] -= _spring_force
+                            _min_force = _spring_force
+                            if np.random.random() < 0.9:
+                                if _spring_force[0] > _spring_force[1]:
+                                    _min_force[0] = 0
+                                elif _spring_force[0] < _spring_force[1]:
+                                    _min_force[1] = 0
+                            else:
+                                if _spring_force[0] > _spring_force[1]:
+                                    _min_force[1] = 0
+                                elif _spring_force[0] < _spring_force[1]:
+                                    _min_force[0] = 0
+                                else:
+                                    _min_force[1] = 0
+                            if np.random.random() < 0.7:
+                                _sum_force[_blocka] += _min_force
+                            else:
+                                _sum_force[_blockb] -= _min_force
                 return np.array(_sum_force,dtype=np.int32)
             _sum_force = cal_block_force()
+            _field_force = block_affect_byfield()
             _new_coordinate_raw = (_sum_force + _coordinate).T
             _new_coordinate_clipB = np.array([np.clip(_new_coordinate_raw[0],0,self.row),np.clip(_new_coordinate_raw[1],0,self.col)],dtype=np.int32)+_size.T
-            _new_coordinate_clip = np.array([np.clip(_new_coordinate_clipB[0],0,self.row-1),np.clip(_new_coordinate_clipB[1],0,self.col-1)],dtype=np.int32)-_size.T
+            _new_coordinate_clip = np.array([np.clip(_new_coordinate_clipB[0],0,self.row),np.clip(_new_coordinate_clipB[1],0,self.col)],dtype=np.int32)-_size.T
             self.coordinate_list = np.array(_new_coordinate_clip.T, dtype=np.uint8)
             self.all_coordinate_list.append(self.coordinate_list.copy())
             return None
@@ -230,10 +275,12 @@ class EDA_method:
         self.data_pack.append([_HPWL,_feasible,_global_vector,_orig_coord])
         return None
     def forward(self):
-        for i in trange(60):
+        for i in trange(10000):
             self.matrix = self.convert_tomatrix()
             self.all_matrix.append(self.matrix.copy())
             self.loss()
+            if self.feasible_list[-1] :
+                break
         return None
 
 class MatrixIterationVisualize(App):
