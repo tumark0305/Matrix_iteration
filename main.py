@@ -15,11 +15,11 @@ LabelBase.register(name='chinese', fn_regular='C:\\Windows\\Fonts\\msjh.ttc')
 class EDA_method:
     max_block_size = 8
     def __init__(self):
-        self.col, self.row = 10,15
+        self.col, self.row = 15,20
         self.matrix = None
         self.all_matrix = []
         self.data_pack = []
-        self.block_count = 10
+        self.block_count = 20
         self.nonsquare_count = 2
         self.coordinate_list = []
         self.size_list = []
@@ -193,6 +193,29 @@ class EDA_method:
             _diff = _v1.astype(int) - _v2.astype(int)
             _result = np.abs(_diff).sum()
             return _result
+        def spring_method():
+            _coordinate = self.coordinate_list.astype(np.int32)
+            _size = self.size_list.astype(np.int32)
+            def cal_block_force():
+                _sum_force = [np.array([0,0],dtype=np.int32) for _ in range(self.block_count)]
+                for _blocka in range(self.block_count):
+                    _bordera = [[_coordinate[_blocka][0],_coordinate[_blocka][0]+_size[_blocka][0]],[_coordinate[_blocka][1],_coordinate[_blocka][1]+_size[_blocka][1]]]
+                    for _blockb in range(_blocka+1,self.block_count):
+                        _borderb = [[_coordinate[_blockb][0],_coordinate[_blockb][0]+_size[_blockb][0]],[_coordinate[_blockb][1],_coordinate[_blockb][1]+_size[_blockb][1]]]
+                        _overlap = [min(_bordera[0][1],_borderb[0][1]) - max(_bordera[0][0],_borderb[0][0]),min(_bordera[1][1],_borderb[1][1]) - max(_bordera[1][0],_borderb[1][0])]
+                        if _overlap[0]>0 and _overlap[1]>0:
+                            _overlap = np.array(_overlap,dtype = np.int32)
+                            _spring_force = np.clip(np.ceil(_overlap/2),0,None).astype(np.int32)
+                            _sum_force[_blocka] += _spring_force
+                            _sum_force[_blockb] -= _spring_force
+                return np.array(_sum_force,dtype=np.int32)
+            _sum_force = cal_block_force()
+            _new_coordinate_raw = (_sum_force + _coordinate).T
+            _new_coordinate_clipB = np.array([np.clip(_new_coordinate_raw[0],0,self.row),np.clip(_new_coordinate_raw[1],0,self.col)],dtype=np.int32)+_size.T
+            _new_coordinate_clip = np.array([np.clip(_new_coordinate_clipB[0],0,self.row-1),np.clip(_new_coordinate_clipB[1],0,self.col-1)],dtype=np.int32)-_size.T
+            self.coordinate_list = np.array(_new_coordinate_clip.T, dtype=np.uint8)
+            self.all_coordinate_list.append(self.coordinate_list.copy())
+            return None
         
         _feasible = feasible()
         _HPWL = HPWL()
@@ -201,7 +224,8 @@ class EDA_method:
         self.HPWL_list.append(_HPWL)
         self.feasible_list.append(_feasible)
         self.all_global_vector_list.append(_global_vector)
-        field_grade()
+        #field_grade()
+        spring_method()
         #fast_method()
         self.data_pack.append([_HPWL,_feasible,_global_vector,_orig_coord])
         return None
