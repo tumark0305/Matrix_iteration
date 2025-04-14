@@ -217,6 +217,8 @@ class EDA_method:
             def cal_cost(_input_block:block_info , _if_atrow:int)->float:
                 def combine_block(_block_new:block_info , _block_placed:block_info)->block_info:
                     _combine_block = block_info()
+                    _block_new.step = _block_placed.coordinate + _block_placed.size
+                    _block_new.step[1] = 0
                     if len(_block_new.sublock) == 0:
                         _combine_block.sublock.append(_block_new)
                     else:
@@ -226,23 +228,19 @@ class EDA_method:
                     else:
                         _combine_block.sublock.extend(_block_placed.sublock)
                     _combine_block.cal_from_sublock()
+                    _combine_block.size[1] = 1
                     return _combine_block
-                def cal_complex_loss(_now_block:block_info , _placed_block:block_info)->float:
+                def cal_complex_loss(_now_block:block_info )->float:
                     _now_block.tag = "current"
-                    _beforeD = 0
-                    for _sublock in _placed_block.sublock:#_placed_block從mirror0來的不會有群組
-                        _beforeD += np.linalg.norm(_sublock.history_coordinate[0] - _sublock.coordinate)
-                    _placed_mirror0.remove(_placed_block)
-                    _new_block = combine_block(_now_block , _placed_block)
-                    _new_block.step = (_new_block.global_vector / len(_new_block.sublock)).astype(np.int32)
-                    _new_block.step[1] = 0
-                    _new_block.move()
+                    _new_block = copy.deepcopy(_now_block)
+                    _effected_blocks = []
                     _changed = True
                     while _changed:
                         _changed = False
                         for _placed_without_current_block in _placed_mirror0.copy():#mirror1 目標group是否碰到已存在group，有就收入目標group
                             _overlap = overlap(_new_block , _placed_without_current_block)
                             if _overlap[0]>0 and _overlap[1]>0:
+                                _effected_blocks.append(copy.deepcopy(_placed_without_current_block))
                                 _placed_mirror0.remove(_placed_without_current_block)
                                 _new_block = combine_block(_new_block , _placed_without_current_block)
                                 _new_block.step = (_new_block.global_vector / len(_new_block.sublock)).astype(np.int32)
@@ -259,20 +257,23 @@ class EDA_method:
                             _sublock.tag = "placed"
                         else:
                             _afterD += np.linalg.norm(_sublock.history_coordinate[0] - _sublock.coordinate)
+                    _beforeD = 0
+                    for _block in _effected_blocks:#_effected_blocks從mirror0來的不會有群組
+                        _beforeD += np.linalg.norm(_block.history_coordinate[0] - _block.coordinate)
                     _cost = _alpha * _DL + _afterD - _beforeD
                     return _cost
                 _placed_mirror0 = copy.deepcopy(_placed)#選項計算不能影響現實
                 _now_block = copy.deepcopy(_input_block)
-                _now_block.coordinate[1] = _if_atrow
+                _now_block.new_coordinate[1] = _if_atrow
                 _now_block.teleport()
                 _output = None
                 for _placed_block in _placed_mirror0.copy():#mirror0 目標是否碰到已存在
                     _overlap = overlap(_now_block , _placed_block)
                     if _overlap[0]>0 and _overlap[1]>0:
-                        _output = cal_complex_loss(_now_block , _placed_block)
+                        _output = cal_complex_loss(_now_block)
                         break
                 if _output is None:
-                    _output = abs(_if_atrow - _input_block.coordinate[1])
+                    _output = _alpha * abs(_if_atrow - _input_block.coordinate[1])
                 return _output
             _placed = []
             _block_list = copy.deepcopy(self.block_list)
@@ -312,13 +313,17 @@ class EDA_method:
         self.matrix = self.convert_tomatrix()
         self.all_matrix.append(self.matrix.copy())
         self.loss("abacus")
+        [_block.teleport() for _block in self.block_list]
+        self.matrix = self.convert_tomatrix()
+        self.all_matrix.append(self.matrix.copy())
+        """
         for _ in range(1000):
             [_block.move() for _block in self.block_list]
             self.matrix = self.convert_tomatrix()
             self.all_matrix.append(self.matrix.copy())
             self.loss("spring")
             if self.feasible_list[-1] :
-                break
+                break"""
         
         return None
 
