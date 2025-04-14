@@ -7,66 +7,113 @@ from kivy.properties import ListProperty
 from kivy.core.text import LabelBase
 from kivy.core.window import Window
 from kivy.uix.anchorlayout import AnchorLayout
+import copy
 import numpy as np
 from scipy import ndimage
 from tqdm import trange
 
 LabelBase.register(name='chinese', fn_regular='C:\\Windows\\Fonts\\msjh.ttc')
+
+class block_info:
+    col, row = 8,20
+    def __init__(self,_coordinate = np.zeros(2,dtype=np.int32),_size = np.zeros(2,dtype=np.int32)):
+        self.coordinate = _coordinate.copy()#x,y
+        self.size = _size.copy()#x,y
+        self.step = np.zeros(2,dtype=np.int32)
+        self.history_coordinate = [_coordinate.copy()]
+        self.global_vector = np.zeros(2,dtype=np.int32)
+        self.new_coordinate = _coordinate.copy()
+        self.tag = "single"
+        self.sublock = []
+    def clip_coordinate(self):
+        _output = self.coordinate.copy()
+        if _output[0] +self.size[0] > self.row:
+            _output[0] = self.row-self.size[0]
+        elif _output[0] < 0:
+            _output[0] = 0
+        if _output[1] +self.size[1]> self.col:
+            _output[1] = self.col-self.size[1]
+        elif _output[1] < 0:
+            _output[1] = 0
+        return _output
+    def move(self):
+        self.history_coordinate.append(self.coordinate.copy())
+        self.coordinate += self.step
+        self.coordinate = self.clip_coordinate()
+        _difference =  self.history_coordinate[-1] - self.coordinate
+        for _sublock in self.sublock:
+            _sublock.coordinate += _difference
+        self.global_vector = self.history_coordinate[0] - self.coordinate
+        return None
+    def teleport(self):
+        self.history_coordinate.append(self.coordinate.copy())
+        self.coordinate = self.new_coordinate.copy()
+        self.coordinate = self.clip_coordinate()
+        _difference =  self.history_coordinate[-1] - self.coordinate
+        for _sublock in self.sublock:
+            _sublock.coordinate += _difference
+        self.global_vector = self.history_coordinate[0] - self.coordinate
+        return None
+    def cal_from_sublock(self):
+        self.tag = "combined"
+        _all_x = []
+        _all_y = []
+        _all_size = np.zeros(2,dtype=np.int32)
+        _global_vector = np.zeros(2,dtype=np.int32)
+        for _block in self.sublock:
+            _all_x.append(_block.coordinate[0])
+            _all_y.append(_block.coordinate[1])
+            _all_size += _block.size
+            _global_vector += _block.history_coordinate[0] - _block.coordinate
+        self.coordinate = np.array([min(_all_x),min(_all_y)],dtype=np.int32)
+        self.size = _all_size
+        self.global_vector = _global_vector
+        return None
+
 class EDA_method:
-    max_block_size = 6
+    max_block_size = [6,1]
+    abacus_alpha = 1
     def __init__(self):
-        self.col, self.row = 15,20
+        self.col, self.row = block_info.col , block_info.row
         self.matrix = None
         self.all_matrix = []
         self.data_pack = []
         self.block_count = 20
-        self.nonsquare_count = 2
-        self.coordinate_list = []
-        self.size_list = []
         self.HPWL_list = []
         self.feasible_list = []
-        self.all_coordinate_list = []
         self.all_global_vector_list = []
+        self.block_list = []
     def load_random_matrix(self):
         _raw_mat = np.random.randint(0, 100, size=(self.col, self.row), dtype=np.uint8)
         _top_indices = np.unravel_index(np.argsort(_raw_mat, axis=None)[-self.block_count:], _raw_mat.shape)
-        _block_size_x = np.random.randint(1, self.max_block_size, size=(len(_top_indices[0])), dtype=np.uint8)
-        _block_size_y = _block_size_x.copy()[:len(_top_indices[0])-self.nonsquare_count]
-        _block_size_y = np.concatenate((_block_size_y, np.random.randint(1, self.max_block_size, size=(self.nonsquare_count), dtype=np.uint8)))
-        
-        [self.coordinate_list.append([_top_indices[0][_idx],_top_indices[1][_idx]]) for _idx in range(self.block_count)]
-        [self.size_list.append([_block_size_x[_idx],_block_size_y[_idx]]) for _idx in range(self.block_count)]
-        self.coordinate_list = np.array(self.coordinate_list, dtype=np.uint8)
-        self.size_list = np.array(self.size_list, dtype=np.uint8)
-        self.all_coordinate_list.append(self.coordinate_list.copy())
-        
+        if self.max_block_size[0] > 1:
+            _block_size_x = np.random.randint(1, self.max_block_size[0], size=(len(_top_indices[0])), dtype=np.uint8)
+        else:
+            _block_size_x = np.ones(len(_top_indices[0]), dtype=np.uint8)
+        if self.max_block_size[1] > 1:
+            _block_size_y = np.random.randint(1, self.max_block_size[1], size=(len(_top_indices[1])), dtype=np.uint8)
+        else:
+            _block_size_y = np.ones(len(_top_indices[1]), dtype=np.uint8)
+        [self.block_list.append(block_info(np.array([_top_indices[0][_idx],_top_indices[1][_idx]],dtype=np.int32),np.array([_block_size_x[_idx],_block_size_y[_idx]],dtype=np.int32))) for _idx in range(self.block_count)]
         return None
     def convert_tomatrix(self):
         _output = np.zeros((self.col, self.row), dtype=np.uint8)
         for _y in range(len(_output)):
             for _x in range(len(_output[_y])):
-                for _block_idx,_coordinate in enumerate(self.coordinate_list):
-                    if 0 <= _x - _coordinate[0]  <self.size_list[_block_idx][0] and 0 <= _y - _coordinate[1] <self.size_list[_block_idx][1]:
+                for _block in self.block_list:
+                    if 0<= _x - _block.coordinate[0] < _block.size[0] and 0<=_y-_block.coordinate[1]<_block.size[1]:
                         _output[_y][_x] +=1
         return _output
-    def loss(self):
-        def calculate_block_centers():
-            centers = []
-            for idx in range(len(self.coordinate_list)):
-                x, y = self.coordinate_list[idx]
-                width, height = self.size_list[idx]
-                center_x = int(x + width / 2)
-                center_y = int(y + height / 2)
-                centers.append([center_x, center_y])
-            return np.array(centers)
+    def loss(self,_method:str):
+        assert _method in ["spring" , "abacus"]
         def feasible()->bool:
             _all_x = []
             _all_y = []
-            for _idx in range(self.block_count):
-                _all_x.append(self.coordinate_list[_idx][0] + self.size_list[_idx][0])
-                _all_x.append(self.coordinate_list[_idx][0])
-                _all_y.append(self.coordinate_list[_idx][1] + self.size_list[_idx][1])
-                _all_y.append(self.coordinate_list[_idx][1])
+            for _block in self.block_list:
+                _all_x.append(_block.coordinate[0] + _block.size[0])
+                _all_x.append(_block.coordinate[0])
+                _all_y.append(_block.coordinate[1] + _block.size[1])
+                _all_y.append(_block.coordinate[1])
             _L = min(_all_x) >= 0
             _R = max(_all_x) <= self.row
             _B = min(_all_y) >=0
@@ -74,213 +121,205 @@ class EDA_method:
             _overlap = not np.any(self.matrix >= 2)
                 
             return all([_L,_R,_T,_B,_overlap])
-        def field_grade():
-            def uni_charge():
-                _soft_e = 1e-3
-                _soft_pw = 1.5
-                _max_step = 3
-
-                _pos_charge = np.zeros((self.col, self.row,2), dtype=np.float32)
-                for _pos in _max_centroids:
-                    _pos_array = np.array(_pos)
-                    for _y in range(self.col):
-                        for _x in range(self.row):
-                            _diff = np.array([_x, _y]) - _pos_array
-                            _r2 = np.sum(_diff ** 2)
-                            if _r2 != 0:
-                                _r = np.sqrt(_r2)
-                                _pos_charge[_y][_x] += (_diff / (_r + _soft_e)) * (1 / (_r**_soft_pw + _soft_e)) * _max_value
-                _result = np.ceil(np.abs(_pos_charge)) * np.sign(_pos_charge)
-                _delta = np.clip(_result, -_max_step, _max_step)
-                return _delta.astype(np.int32)
-            def bi_charge():
-                _output = np.zeros((self.col, self.row, 2), dtype=np.float32)
-                _pos_charge = _output.copy()
-                _neg_charge = _output.copy()
-    
-                for _pos in _max_centroids:
-                    _pos_array = np.array(_pos)
-                    for _y in range(self.col):
-                        for _x in range(self.row):
-                            _diff = np.array([_x, _y]) - _pos_array
-                            _r2 = np.sum(_diff ** 2)
-                            if _r2 != 0:
-                                _r = np.sqrt(_r2)
-                                _pos_charge[_y][_x] += (_diff / _r) * (1 / _r) * _max_value
-
-                for _neg in _zero_centroids:
-                    _neg_array = np.array(_neg)
-                    for _y in range(self.col):
-                        for _x in range(self.row):
-                            _diff = _neg_array - np.array([_x, _y])
-                            _r2 = np.sum(_diff ** 2)
-                            if _r2 != 0:
-                                _r = np.sqrt(_r2)
-                                _neg_charge[_y][_x] += (_diff / _r) * (1 / _r) * _max_value
-
-                _output = _pos_charge + _neg_charge
-                _result = np.ceil(np.abs(_output)) * np.sign(_output)
-                return _result.astype(np.int32) 
-
-            _center_coord = calculate_block_centers()
-            _max_value = np.max(self.matrix)
-            _max_mask = (self.matrix == _max_value)
-            _labeled_array, _num_features = ndimage.label(_max_mask)
-            _max_centroids = ndimage.center_of_mass(_max_mask, _labeled_array, range(1, _num_features + 1))
-            #_max_centroids = np.mean(np.argwhere(self.matrix >= 2), axis=0)
-            _zero_mask = (self.matrix == 0)
-            _labeled_array, _num_features = ndimage.label(_zero_mask)
-            _zero_centroids = ndimage.center_of_mass(_zero_mask, _labeled_array, range(1, _num_features + 1))
-            if len(_zero_centroids) <= 1:
-                _field_matrix = uni_charge() 
-            else:
-                _field_matrix = uni_charge() 
-                #_field_matrix = bi_charge()
-            _vectors = []
-            for _idx in range(self.block_count):
-                _vet = [0,0]
-                _coord = [_center_coord[_idx][0],_center_coord[_idx][1]]
-                if _center_coord[_idx][0] + self.size_list[_idx][0] >= self.row:
-                    _vet[0] = self.row - _center_coord[_idx][0] - self.size_list[_idx][0]
-                    _coord[0] = self.row-1
-                if _center_coord[_idx][1] + self.size_list[_idx][1] >= self.col:
-                    _vet[1] = self.col - _center_coord[_idx][1] - self.size_list[_idx][1]
-                    _coord[1] = self.col-1
-                if _center_coord[_idx][0] <0:
-                    _vet[0] = 0
-                    _coord[0] = 0
-                if _center_coord[_idx][1] <0:
-                    _vet[1] = 0
-                    _coord[1] = 0
-                _vectors.append(_field_matrix[_coord[1], _coord[0]] + np.array(_vet))
-            _new_coord = (self.coordinate_list + np.array(_vectors))
-            _new_coord_clip = np.clip(_new_coord, 0,None)
-            self.coordinate_list = np.array(_new_coord_clip, dtype=np.uint8)
-            self.all_coordinate_list.append(self.coordinate_list.copy())
-            return None
-        def fast_method():
-            _sep_coordinate = np.transpose(self.coordinate_list)
-            _order = np.argsort(_sep_coordinate[0])
-            _e0 = 1
-            _sub_sum0 = 0
-            for _idx0 in range(1,len(_order)):
-                _sub_sum1 = 0
-                for _idx1 in range(1,_idx0):
-                    _sub_sum1 += self.size_list[_order[_idx1]][0]
-                _sub_sum0 += _e0 * (_sep_coordinate[0][_order[_idx0]] - _sub_sum1)
-            _sub_sum0 += _e0 * _sep_coordinate[0][_order[0]]
-            _sub_sum3 = _e0 * len(_order)
-            _x0 = int(_sub_sum0 / _sub_sum3)
-            if _x0 <0:
-                _x0 = 0
-            _coordinate_list = self.coordinate_list.copy()
-            _xn = _x0
-            for _order_idx in _order:
-                _cell = [_xn,_sep_coordinate[1][_order_idx]]
-                _coordinate_list[_order_idx] = _cell
-                _xn += self.size_list[_order_idx][0]
-            self.coordinate_list = np.array(_coordinate_list, dtype=np.uint8)
-            self.all_coordinate_list.append(self.coordinate_list.copy())
-
-            return None
         def HPWL()->float:
-            _sep_coordinate = np.transpose(self.coordinate_list)
-            _output = (max(_sep_coordinate[0]) - min(_sep_coordinate[0]) + max(_sep_coordinate[1]) - min(_sep_coordinate[1]))/2
+            _all_x = []
+            _all_y = []
+            for _block in self.block_list:
+                _all_x.append(_block.coordinate[0])
+                _all_y.append(_block.coordinate[1])
+            _output = (max(_all_x) - min(_all_x) + max(_all_y) - min(_all_y))/2
             return _output
         def global_vector()->float:
-            _v1 = self.all_coordinate_list[0]
-            _v2 = self.coordinate_list
-            _diff = _v1.astype(int) - _v2.astype(int)
-            _result = np.abs(_diff).sum()
+            _result = 0
+            for _block in self.block_list:
+                _result += np.linalg.norm(_block.global_vector) / len(self.block_list)
             return _result
         def spring_method():
-            def block_affect_byfield():
-                _zero_mask = (self.matrix == 0)
-                _labeled_array, _num_features = ndimage.label(_zero_mask)
-                _zero_centroids = ndimage.center_of_mass(_zero_mask, _labeled_array, range(1, _num_features + 1))
-                if len(_zero_centroids) >= 2:
-                    _output = np.zeros((self.col, self.row, 2), dtype=np.float32)
-                    _neg_charge = _output.copy()
-                    _neg = _zero_centroids[0]
-                    _neg_array = np.array(_neg)
-                    for _y in range(self.col):
-                        for _x in range(self.row):
-                            _diff = _neg_array - np.array([_x, _y])
-                            _r2 = np.sum(_diff ** 2)
-                            if _r2 != 0:
-                                _r = np.sqrt(_r2)
-                                _neg_charge[_y][_x] += (_diff / _r) * (1 / _r)
-                    _result = (np.ceil(np.abs(_neg_charge)) * np.sign(_neg_charge)).astype(np.int32) 
-                    _force = np.zeros((self.block_count, 2), dtype=np.int32)
-                    for _idx in range(self.block_count):
-                        _xcoord = np.clip(self.coordinate_list[_idx][0],0,self.row-1)
-                        _ycoord = np.clip(self.coordinate_list[_idx][1],0,self.col-1)
-                        _force[_idx] = _result[_ycoord][_xcoord]
-                else:
-                    _force = np.zeros((self.block_count, 2), dtype=np.int32)
-                for _block in range(self.block_count):
-                    if np.array_equal(_sum_force[_block], [0, 0]) :
-                        _force[_block] = np.array([0, 0])
-                _force = np.array(_force, dtype=np.int32)
-                return _force
-            _coordinate = self.coordinate_list.astype(np.int32)
-            _size = self.size_list.astype(np.int32)
-            def cal_block_force():
-                _sum_force = [np.array([0,0],dtype=np.int32) for _ in range(self.block_count)]
-                for _blocka in range(self.block_count):
-                    _bordera = [[_coordinate[_blocka][0],_coordinate[_blocka][0]+_size[_blocka][0]],[_coordinate[_blocka][1],_coordinate[_blocka][1]+_size[_blocka][1]]]
-                    for _blockb in range(_blocka+1,self.block_count):
-                        _borderb = [[_coordinate[_blockb][0],_coordinate[_blockb][0]+_size[_blockb][0]],[_coordinate[_blockb][1],_coordinate[_blockb][1]+_size[_blockb][1]]]
-                        _overlap = [min(_bordera[0][1],_borderb[0][1]) - max(_bordera[0][0],_borderb[0][0]),min(_bordera[1][1],_borderb[1][1]) - max(_bordera[1][0],_borderb[1][0])]
+            _sum_force = [np.array([0,0],dtype=np.int32) for _ in range(len(self.block_list))]
+            for _a in range(len(self.block_list)):
+                for _b in range(_a+1,len(self.block_list)):
+                    _overlap = overlap(self.block_list[_a],self.block_list[_b])
+                    if _overlap[0]>0 and _overlap[1]>0:
+                        _overlap = np.array(_overlap,dtype = np.int32)
+                        _spring_force = np.clip(np.ceil(_overlap/2),0,None).astype(np.int32)
+                        _min_force = _spring_force
+                        if np.random.random() < 0.9:
+                            if _spring_force[0] > _spring_force[1]:
+                                _min_force[0] = 0
+                            elif _spring_force[0] < _spring_force[1]:
+                                _min_force[1] = 0
+                        else:
+                            if _spring_force[0] > _spring_force[1]:
+                                _min_force[1] = 0
+                            elif _spring_force[0] < _spring_force[1]:
+                                _min_force[0] = 0
+                            else:
+                                _min_force[1] = 0
+                        if np.random.random() < 0.7:
+                            _sum_force[_a] += _min_force
+                        else:
+                            _sum_force[_b] -= _min_force
+            return np.array(_sum_force,dtype=np.int32)
+        def overlap(_blocka,_blockb)->list[int]:
+            _bordera = [[_blocka.coordinate[0],_blocka.coordinate[0]+_blocka.size[0]],[_blocka.coordinate[1],_blocka.coordinate[1]+_blocka.size[1]]]
+            _borderb = [[_blockb.coordinate[0],_blockb.coordinate[0]+_blockb.size[0]],[_blockb.coordinate[1],_blockb.coordinate[1]+_blockb.size[1]]]
+            _overlap = [min(_bordera[0][1],_borderb[0][1]) - max(_bordera[0][0],_borderb[0][0]),min(_bordera[1][1],_borderb[1][1]) - max(_bordera[1][0],_borderb[1][0])]
+            return _overlap
+        def abacus_method_old(_alpha:float = 1):
+            def placed_cost(_now_block:block_info)->float:
+                _output=0.0
+                def effected(_now_block:block_info)->list:
+                    _effected_output = []
+                    for _a in range(len(_placed)):
+                        _overlap = overlap(_placed[_a],_now_block)
                         if _overlap[0]>0 and _overlap[1]>0:
-                            _overlap = np.array(_overlap,dtype = np.int32)
-                            _spring_force = np.clip(np.ceil(_overlap/2),0,None).astype(np.int32)
-                            _min_force = _spring_force
-                            if np.random.random() < 0.9:
-                                if _spring_force[0] > _spring_force[1]:
-                                    _min_force[0] = 0
-                                elif _spring_force[0] < _spring_force[1]:
-                                    _min_force[1] = 0
-                            else:
-                                if _spring_force[0] > _spring_force[1]:
-                                    _min_force[1] = 0
-                                elif _spring_force[0] < _spring_force[1]:
-                                    _min_force[0] = 0
-                                else:
-                                    _min_force[1] = 0
-                            if np.random.random() < 0.7:
-                                _sum_force[_blocka] += _min_force
-                            else:
-                                _sum_force[_blockb] -= _min_force
-                return np.array(_sum_force,dtype=np.int32)
-            _sum_force = cal_block_force()
-            _field_force = block_affect_byfield()
-            _new_coordinate_raw = (_sum_force + _coordinate).T
-            _new_coordinate_clipB = np.array([np.clip(_new_coordinate_raw[0],0,self.row),np.clip(_new_coordinate_raw[1],0,self.col)],dtype=np.int32)+_size.T
-            _new_coordinate_clip = np.array([np.clip(_new_coordinate_clipB[0],0,self.row),np.clip(_new_coordinate_clipB[1],0,self.col)],dtype=np.int32)-_size.T
-            self.coordinate_list = np.array(_new_coordinate_clip.T, dtype=np.uint8)
-            self.all_coordinate_list.append(self.coordinate_list.copy())
+                            _effected_output.append(copy.deepcopy(_placed[_a]))
+                    return _effected_output
+                _effected = effected(_now_block)
+                if len(_effected) == 0:
+                    _target_coord = _now_block.coordinate
+                    _output = _alpha * np.linalg.norm(_now_block.global_vector)
+                else:
+                    _effected_block = _effected[0]
+                    
+                    _target_coord = _now_block.coordinate
+                    _target_coord[0] = _effected_block.coordinate[0] + _effected_block.size[0]
+                    _moved_now_block = copy.deepcopy(_now_block)
+                    _moved_now_block.new_coordinate = _target_coord
+                    _moved_now_block.teleport()
+
+                    _new_block = block_info()
+                    _new_block.sublock.append(_moved_now_block)
+                    _new_block.sublock.extend(_effected_block.sublock.copy())
+                    _new_block.cal_from_sublock()#everyblock should move _new_block.global_vector
+                    _sum = len(_effected_block.sublock) * np.linalg.norm(_new_block.global_vector)
+                    _output = _alpha * np.linalg.norm(_moved_now_block.global_vector) + _sum
+                return _output
+            _all_x = np.array([_block.coordinate[0] for _block in self.block_list])
+            _sorted = np.argsort(_all_x)
+            _placed = []
+            for _block_idx in _sorted:
+                _all_cost = []
+                for _option in range(block_info.col):
+                    _block = copy.deepcopy(self.block_list[_block_idx])
+                    _block.new_coordinate = _block.coordinate.copy()
+                    _block.new_coordinate[1] = _option
+                    _block.teleport()
+                    _all_cost.append(placed_cost(_block))
+                _sorted_cost_idx = np.argsort(_all_cost)
+                _block = self.block_list[_block_idx]
+                _block.new_coordinate = _block.coordinate.copy()
+                _block.new_coordinate[1] = _sorted_cost_idx[0]
+                _block.teleport()
             return None
-        
+        def abacus_method():
+            _alpha = 1
+            def cal_cost(_input_block:block_info , _if_atrow:int)->float:
+                def combine_block(_block_new:block_info , _block_placed:block_info)->block_info:
+                    _combine_block = block_info()
+                    if len(_block_new.sublock) == 0:
+                        _combine_block.sublock.append(_block_new)
+                    else:
+                        _combine_block.sublock.extend(_block_new.sublock)
+                    if len(_block_placed.sublock) == 0:
+                        _combine_block.sublock.append(_block_placed)
+                    else:
+                        _combine_block.sublock.extend(_block_placed.sublock)
+                    _combine_block.cal_from_sublock()
+                    return _combine_block
+                def cal_complex_loss(_now_block:block_info , _placed_block:block_info)->float:
+                    _now_block.tag = "current"
+                    _beforeD = 0
+                    for _sublock in _placed_block.sublock:#_placed_block從mirror0來的不會有群組
+                        _beforeD += np.linalg.norm(_sublock.history_coordinate[0] - _sublock.coordinate)
+                    _placed_mirror0.remove(_placed_block)
+                    _new_block = combine_block(_now_block , _placed_block)
+                    _new_block.step = (_new_block.global_vector / len(_new_block.sublock)).astype(np.int32)
+                    _new_block.step[1] = 0
+                    _new_block.move()
+                    _changed = True
+                    while _changed:
+                        _changed = False
+                        for _placed_without_current_block in _placed_mirror0.copy():#mirror1 目標group是否碰到已存在group，有就收入目標group
+                            _overlap = overlap(_new_block , _placed_without_current_block)
+                            if _overlap[0]>0 and _overlap[1]>0:
+                                _placed_mirror0.remove(_placed_without_current_block)
+                                _new_block = combine_block(_new_block , _placed_without_current_block)
+                                _new_block.step = (_new_block.global_vector / len(_new_block.sublock)).astype(np.int32)
+                                _new_block.step[1] = 0
+                                _new_block.move()
+                                _changed = True
+                                break
+                    _placed_mirror0.append(_new_block)
+                    _afterD = 0
+                    _DL = 0
+                    for _sublock in _new_block.sublock:
+                        if _sublock.tag == "current":
+                            _DL += np.linalg.norm(_sublock.history_coordinate[0] - _sublock.coordinate)
+                            _sublock.tag = "placed"
+                        else:
+                            _afterD += np.linalg.norm(_sublock.history_coordinate[0] - _sublock.coordinate)
+                    _cost = _alpha * _DL + _afterD - _beforeD
+                    return _cost
+                _placed_mirror0 = copy.deepcopy(_placed)#選項計算不能影響現實
+                _now_block = copy.deepcopy(_input_block)
+                _now_block.coordinate[1] = _if_atrow
+                _now_block.teleport()
+                _output = None
+                for _placed_block in _placed_mirror0.copy():#mirror0 目標是否碰到已存在
+                    _overlap = overlap(_now_block , _placed_block)
+                    if _overlap[0]>0 and _overlap[1]>0:
+                        _output = cal_complex_loss(_now_block , _placed_block)
+                        break
+                if _output is None:
+                    _output = abs(_if_atrow - _input_block.coordinate[1])
+                return _output
+            _placed = []
+            _block_list = copy.deepcopy(self.block_list)
+            _all_x = np.array([_block.coordinate[0] for _block in self.block_list])
+            _sorted = np.argsort(_all_x)
+            for _block_idx in _sorted:
+                _all_cost = []
+                for _option_row in range(block_info.col):
+                    _all_cost.append(cal_cost(_block_list[_block_idx],_option_row))#計算出秀都是相同值
+
+                _sorted_cost_idx = np.argsort(_all_cost)
+                _block = _block_list[_block_idx]
+                _block.new_coordinate = _block.coordinate.copy()
+                _block.new_coordinate[1] = _sorted_cost_idx[0]
+                _block.teleport()
+                _placed.append(_block)
+            return None
         _feasible = feasible()
         _HPWL = HPWL()
-        _orig_coord = self.coordinate_list.copy()
+        _orig_coord = [_block.coordinate.copy() for _block in self.block_list]
         _global_vector = global_vector()
         self.HPWL_list.append(_HPWL)
         self.feasible_list.append(_feasible)
         self.all_global_vector_list.append(_global_vector)
-        #field_grade()
-        spring_method()
-        #fast_method()
         self.data_pack.append([_HPWL,_feasible,_global_vector,_orig_coord])
+        if _method == "spring":
+            _sum_force = spring_method()
+            for _x in range(len(self.block_list)):
+                self.block_list[_x].step = _sum_force[_x]
+        elif _method == "abacus":
+            _all_coord = abacus_method()
+            for _x in range(len(self.block_list)):
+                self.block_list[_x].new_coordinate = _all_coord[_x]
         return None
     def forward(self):
-        for i in trange(10000):
+        [_block.move() for _block in self.block_list]
+        self.matrix = self.convert_tomatrix()
+        self.all_matrix.append(self.matrix.copy())
+        self.loss("abacus")
+        for _ in range(1000):
+            [_block.move() for _block in self.block_list]
             self.matrix = self.convert_tomatrix()
             self.all_matrix.append(self.matrix.copy())
-            self.loss()
+            self.loss("spring")
             if self.feasible_list[-1] :
                 break
+        
         return None
 
 class MatrixIterationVisualize(App):
@@ -352,7 +391,7 @@ class MatrixIterationVisualize(App):
                                 font_size=self.font_size,
                                 size_hint=(None, None),
                                 size=(self.cell_width * self.row/3, 40))
-            self.global_vector_label = Label(text = f"全局距離 = {self.data_pack[self.step_count][2]}",
+            self.global_vector_label = Label(text = f"全局距離 = {self.data_pack[self.step_count][2]:.2f}",
                                 font_name='chinese',
                                 font_size=self.font_size,
                                 size_hint=(None, None),
@@ -416,7 +455,7 @@ class MatrixIterationVisualize(App):
         self.step_label.text = f"步數 = {self.step_count}/{len(self.mat_list)}"
         self.HPWL_label.text = f"HPWL = {self.data_pack[self.step_count][0]:.4f}"
         self.feasible_label.text = f"可行 = {self.data_pack[self.step_count][1]}"
-        self.global_vector_label.text = f"全局距離 = {self.data_pack[self.step_count][2]}"
+        self.global_vector_label.text = f"全局距離 = {self.data_pack[self.step_count][2]:.2f}"
         _coord_text = ",".join([f"({_x:02d},{_y:02d})" for _x,_y in self.data_pack[self.step_count][3]])
         self.coord_label.text = f"方塊座標 = {_coord_text}"
         self.matrix = self.mat_list[self.step_count]
