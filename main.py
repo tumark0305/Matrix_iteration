@@ -15,7 +15,13 @@ from tqdm import trange
 LabelBase.register(name='chinese', fn_regular='C:\\Windows\\Fonts\\msjh.ttc')
 
 class block_info:
-    col, row = 8,20
+    reach_counter = 0
+    col, row = 8,15
+    def __new__(cls, *args, **kwargs):
+        instance = super().__new__(cls)
+        cls.reach_counter += 1
+        instance.reach_counter = cls.reach_counter
+        return instance
     def __init__(self,_coordinate = np.zeros(2,dtype=np.int32),_size = np.zeros(2,dtype=np.int32)):
         self.coordinate = _coordinate.copy()#x,y
         self.size = _size.copy()#x,y
@@ -23,7 +29,7 @@ class block_info:
         self.history_coordinate = [_coordinate.copy()]
         self.global_vector = np.zeros(2,dtype=np.int32)
         self.new_coordinate = _coordinate.copy()
-        self.tag = "single"
+        self.tag = f"{self.reach_counter}"
         self.sublock = []
     def clip_coordinate(self):
         _output = self.coordinate.copy()
@@ -40,9 +46,23 @@ class block_info:
         self.history_coordinate.append(self.coordinate.copy())
         self.coordinate += self.step
         self.coordinate = self.clip_coordinate()
-        _difference =  self.history_coordinate[-1] - self.coordinate
+        self.global_vector = self.history_coordinate[0] - self.coordinate
+        if len(self.sublock) >0:
+            _all_x = []
+            _all_y = []
+            for _sublock in self.sublock:
+                _all_x.append(_sublock.coordinate[0])
+                _all_y.append(_sublock.coordinate[1])
+            _real_coord = np.array([min(_all_x),min(_all_y)],dtype=np.int32)
+            _offset = self.coordinate - _real_coord
+            for _sublock in self.sublock:
+                _sublock.coordinate += _offset
+        return None
+    def unprotect_move(self):
+        self.history_coordinate.append(self.coordinate.copy())
+        self.coordinate += self.step
         for _sublock in self.sublock:
-            _sublock.coordinate += _difference
+            _sublock.coordinate += self.step
         self.global_vector = self.history_coordinate[0] - self.coordinate
         return None
     def teleport(self):
@@ -50,6 +70,14 @@ class block_info:
         self.coordinate = self.new_coordinate.copy()
         self.coordinate = self.clip_coordinate()
         _difference =  self.history_coordinate[-1] - self.coordinate
+        for _sublock in self.sublock:
+            _sublock.coordinate += _difference
+        self.global_vector = self.history_coordinate[0] - self.coordinate
+        return None
+    def unprotect_teleport(self):
+        self.history_coordinate.append(self.coordinate.copy())
+        _difference =  (self.new_coordinate - self.coordinate).copy()
+        self.coordinate = self.new_coordinate.copy()
         for _sublock in self.sublock:
             _sublock.coordinate += _difference
         self.global_vector = self.history_coordinate[0] - self.coordinate
@@ -71,7 +99,7 @@ class block_info:
         return None
 
 class EDA_method:
-    max_block_size = [6,1]
+    max_block_size = [8,1]
     abacus_alpha = 1
     def __init__(self):
         self.col, self.row = block_info.col , block_info.row
@@ -83,6 +111,7 @@ class EDA_method:
         self.feasible_list = []
         self.all_global_vector_list = []
         self.block_list = []
+        self.placed_block_list = []
     def load_random_matrix(self):
         _raw_mat = np.random.randint(0, 100, size=(self.col, self.row), dtype=np.uint8)
         _top_indices = np.unravel_index(np.argsort(_raw_mat, axis=None)[-self.block_count:], _raw_mat.shape)
@@ -94,7 +123,7 @@ class EDA_method:
             _block_size_y = np.random.randint(1, self.max_block_size[1], size=(len(_top_indices[1])), dtype=np.uint8)
         else:
             _block_size_y = np.ones(len(_top_indices[1]), dtype=np.uint8)
-        [self.block_list.append(block_info(np.array([_top_indices[0][_idx],_top_indices[1][_idx]],dtype=np.int32),np.array([_block_size_x[_idx],_block_size_y[_idx]],dtype=np.int32))) for _idx in range(self.block_count)]
+        [self.block_list.append(block_info(np.array([_top_indices[1][_idx],_top_indices[0][_idx]],dtype=np.int32),np.array([_block_size_x[_idx],_block_size_y[_idx]],dtype=np.int32))) for _idx in range(self.block_count)]
         return None
     def convert_tomatrix(self):
         _output = np.zeros((self.col, self.row), dtype=np.uint8)
@@ -165,60 +194,14 @@ class EDA_method:
             _borderb = [[_blockb.coordinate[0],_blockb.coordinate[0]+_blockb.size[0]],[_blockb.coordinate[1],_blockb.coordinate[1]+_blockb.size[1]]]
             _overlap = [min(_bordera[0][1],_borderb[0][1]) - max(_bordera[0][0],_borderb[0][0]),min(_bordera[1][1],_borderb[1][1]) - max(_bordera[1][0],_borderb[1][0])]
             return _overlap
-        def abacus_method_old(_alpha:float = 1):
-            def placed_cost(_now_block:block_info)->float:
-                _output=0.0
-                def effected(_now_block:block_info)->list:
-                    _effected_output = []
-                    for _a in range(len(_placed)):
-                        _overlap = overlap(_placed[_a],_now_block)
-                        if _overlap[0]>0 and _overlap[1]>0:
-                            _effected_output.append(copy.deepcopy(_placed[_a]))
-                    return _effected_output
-                _effected = effected(_now_block)
-                if len(_effected) == 0:
-                    _target_coord = _now_block.coordinate
-                    _output = _alpha * np.linalg.norm(_now_block.global_vector)
-                else:
-                    _effected_block = _effected[0]
-                    
-                    _target_coord = _now_block.coordinate
-                    _target_coord[0] = _effected_block.coordinate[0] + _effected_block.size[0]
-                    _moved_now_block = copy.deepcopy(_now_block)
-                    _moved_now_block.new_coordinate = _target_coord
-                    _moved_now_block.teleport()
-
-                    _new_block = block_info()
-                    _new_block.sublock.append(_moved_now_block)
-                    _new_block.sublock.extend(_effected_block.sublock.copy())
-                    _new_block.cal_from_sublock()#everyblock should move _new_block.global_vector
-                    _sum = len(_effected_block.sublock) * np.linalg.norm(_new_block.global_vector)
-                    _output = _alpha * np.linalg.norm(_moved_now_block.global_vector) + _sum
-                return _output
-            _all_x = np.array([_block.coordinate[0] for _block in self.block_list])
-            _sorted = np.argsort(_all_x)
-            _placed = []
-            for _block_idx in _sorted:
-                _all_cost = []
-                for _option in range(block_info.col):
-                    _block = copy.deepcopy(self.block_list[_block_idx])
-                    _block.new_coordinate = _block.coordinate.copy()
-                    _block.new_coordinate[1] = _option
-                    _block.teleport()
-                    _all_cost.append(placed_cost(_block))
-                _sorted_cost_idx = np.argsort(_all_cost)
-                _block = self.block_list[_block_idx]
-                _block.new_coordinate = _block.coordinate.copy()
-                _block.new_coordinate[1] = _sorted_cost_idx[0]
-                _block.teleport()
-            return None
         def abacus_method():
             _alpha = 1
             def cal_cost(_input_block:block_info , _if_atrow:int)->float:
                 def combine_block(_block_new:block_info , _block_placed:block_info)->block_info:
                     _combine_block = block_info()
-                    _block_new.step = _block_placed.coordinate + _block_placed.size
-                    _block_new.step[1] = 0
+                    _block_new.new_coordinate = _block_placed.coordinate + _block_placed.size#
+                    _block_new.new_coordinate[1] = _block_new.coordinate[1]
+                    _block_new.unprotect_teleport()
                     if len(_block_new.sublock) == 0:
                         _combine_block.sublock.append(_block_new)
                     else:
@@ -229,21 +212,34 @@ class EDA_method:
                         _combine_block.sublock.extend(_block_placed.sublock)
                     _combine_block.cal_from_sublock()
                     _combine_block.size[1] = 1
+                    _subcoord = [_sub.coordinate for _sub in _combine_block.sublock]
                     return _combine_block
                 def cal_complex_loss(_now_block:block_info )->float:
-                    _now_block.tag = "current"
+                    def unpack(_placed_mirror:list[block_info])->list[block_info]:
+                        _output_blocks = []
+                        for _combined_block in _placed_mirror:
+                            if len(_combined_block.sublock) == 0:
+                                _output_blocks.append(_combined_block)
+                            else:
+                                _output_blocks.extend(_combined_block.sublock)
+                        return copy.deepcopy(_output_blocks)
+                    _save_tag = _now_block.tag
                     _new_block = copy.deepcopy(_now_block)
+                    _new_block.tag = "current"
                     _effected_blocks = []
                     _changed = True
                     while _changed:
                         _changed = False
                         for _placed_without_current_block in _placed_mirror0.copy():#mirror1 目標group是否碰到已存在group，有就收入目標group
                             _overlap = overlap(_new_block , _placed_without_current_block)
-                            if _overlap[0]>0 and _overlap[1]>0:
-                                _effected_blocks.append(copy.deepcopy(_placed_without_current_block))
+                            if _overlap[0]>=0 and _overlap[1]>0:
+                                _effected_blocks.append(_placed_without_current_block)
                                 _placed_mirror0.remove(_placed_without_current_block)
                                 _new_block = combine_block(_new_block , _placed_without_current_block)
-                                _new_block.step = (_new_block.global_vector / len(_new_block.sublock)).astype(np.int32)
+                                _sun_vector = 0
+                                for _sublock in _new_block.sublock:
+                                    _sun_vector += _sublock.history_coordinate[0][0] - _sublock.coordinate [0]
+                                _new_block.step[0] = int(_sun_vector / len(_new_block.sublock))
                                 _new_block.step[1] = 0
                                 _new_block.move()
                                 _changed = True
@@ -254,14 +250,27 @@ class EDA_method:
                     for _sublock in _new_block.sublock:
                         if _sublock.tag == "current":
                             _DL += np.linalg.norm(_sublock.history_coordinate[0] - _sublock.coordinate)
-                            _sublock.tag = "placed"
+                            _sublock.tag = _save_tag
                         else:
                             _afterD += np.linalg.norm(_sublock.history_coordinate[0] - _sublock.coordinate)
                     _beforeD = 0
                     for _block in _effected_blocks:#_effected_blocks從mirror0來的不會有群組
                         _beforeD += np.linalg.norm(_block.history_coordinate[0] - _block.coordinate)
                     _cost = _alpha * _DL + _afterD - _beforeD
-                    return _cost
+
+                    _placed_condition = unpack(_placed_mirror0)
+                    _oversize = [_combined.size[0] > block_info.row for _combined in _placed_mirror0]
+                    _overlap = []
+                    
+                    if any(_oversize):
+                        _cost = np.inf
+                    for _a in range(len(_placed_condition)):
+                        for _b in range(_a+1 , len(_placed_condition)):
+                            _overlap = overlap(_placed_condition[_a] , _placed_condition[_b])
+                            if _overlap[0]>0 and _overlap[1]>0:
+                                _cost = np.inf
+                    return _cost , _placed_condition
+
                 _placed_mirror0 = copy.deepcopy(_placed)#選項計算不能影響現實
                 _now_block = copy.deepcopy(_input_block)
                 _now_block.new_coordinate[1] = _if_atrow
@@ -270,27 +279,33 @@ class EDA_method:
                 for _placed_block in _placed_mirror0.copy():#mirror0 目標是否碰到已存在
                     _overlap = overlap(_now_block , _placed_block)
                     if _overlap[0]>0 and _overlap[1]>0:
-                        _output = cal_complex_loss(_now_block)
+                        _output,_placed_condition = cal_complex_loss(_now_block)
                         break
                 if _output is None:
-                    _output = _alpha * abs(_if_atrow - _input_block.coordinate[1])
-                return _output
+                    _output = _alpha * np.linalg.norm(_now_block.history_coordinate[0] - _now_block.coordinate)
+                    _placed_mirror0.append(_now_block)
+                    _placed_condition = _placed_mirror0
+                return _output , _placed_condition
             _placed = []
-            _block_list = copy.deepcopy(self.block_list)
+            _block_list = [copy.deepcopy(self.block_list[_x]) for _x in range(len(self.block_list))]
             _all_x = np.array([_block.coordinate[0] for _block in self.block_list])
             _sorted = np.argsort(_all_x)
             for _block_idx in _sorted:
                 _all_cost = []
+                _all_condition = []
                 for _option_row in range(block_info.col):
-                    _all_cost.append(cal_cost(_block_list[_block_idx],_option_row))#計算出秀都是相同值
-
+                    _cost,_condition = cal_cost(_block_list[_block_idx],_option_row)
+                    _all_cost.append(_cost)
+                    _all_condition.append(_condition)
                 _sorted_cost_idx = np.argsort(_all_cost)
-                _block = _block_list[_block_idx]
-                _block.new_coordinate = _block.coordinate.copy()
-                _block.new_coordinate[1] = _sorted_cost_idx[0]
-                _block.teleport()
-                _placed.append(_block)
-            return None
+                _placed = _all_condition[_sorted_cost_idx[0]]
+            _output = []
+            for _block_orig in _block_list:
+                for _block_data in _placed:
+                    if _block_orig.tag == _block_data.tag:
+                        _output.append(_block_data.coordinate)
+                        break
+            return _output
         _feasible = feasible()
         _HPWL = HPWL()
         _orig_coord = [_block.coordinate.copy() for _block in self.block_list]
@@ -304,27 +319,27 @@ class EDA_method:
             for _x in range(len(self.block_list)):
                 self.block_list[_x].step = _sum_force[_x]
         elif _method == "abacus":
+            _orig_coord = [_block.coordinate for _block in self.block_list]
             _all_coord = abacus_method()
             for _x in range(len(self.block_list)):
                 self.block_list[_x].new_coordinate = _all_coord[_x]
         return None
     def forward(self):
-        [_block.move() for _block in self.block_list]
-        self.matrix = self.convert_tomatrix()
-        self.all_matrix.append(self.matrix.copy())
-        self.loss("abacus")
-        [_block.teleport() for _block in self.block_list]
-        self.matrix = self.convert_tomatrix()
-        self.all_matrix.append(self.matrix.copy())
-        """
+        _block_list_copy = [copy.deepcopy(_block) for _block in self.block_list]
+        for _ in range(10):
+            [_block.teleport() for _block in self.block_list]
+            self.matrix = self.convert_tomatrix()
+            self.all_matrix.append(self.matrix.copy())
+            self.loss("abacus")
+
+        self.block_list = _block_list_copy
         for _ in range(1000):
             [_block.move() for _block in self.block_list]
             self.matrix = self.convert_tomatrix()
             self.all_matrix.append(self.matrix.copy())
             self.loss("spring")
             if self.feasible_list[-1] :
-                break"""
-        
+                break
         return None
 
 class MatrixIterationVisualize(App):
