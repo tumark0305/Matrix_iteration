@@ -263,11 +263,6 @@ class EDA_method:
                     
                     if any(_oversize):
                         _cost = np.inf
-                    for _a in range(len(_placed_condition)):
-                        for _b in range(_a+1 , len(_placed_condition)):
-                            _overlap = overlap(_placed_condition[_a] , _placed_condition[_b])
-                            if _overlap[0]>0 and _overlap[1]>0:
-                                _cost = np.inf
                     return _cost , _placed_condition
 
                 _placed_mirror0 = copy.deepcopy(_placed)#選項計算不能影響現實
@@ -332,7 +327,7 @@ class EDA_method:
             self.loss("abacus")
 
         self.block_list = _block_list_copy
-        for _ in range(1000):
+        for _ in range(10):
             [_block.move() for _block in self.block_list]
             self.matrix = self.convert_tomatrix()
             self.all_matrix.append(self.matrix.copy())
