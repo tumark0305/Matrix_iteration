@@ -107,7 +107,7 @@ class EDA_method:
         self.matrix = None
         self.all_matrix = []
         self.data_pack = []
-        self.block_count = 20
+        self.block_count = 35
         self.HPWL_list = []
         self.feasible_list = []
         self.all_global_vector_list = []
