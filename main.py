@@ -99,6 +99,7 @@ class block_info:
         return None
 
 class EDA_method:
+    quality_alpha = 1
     max_block_size = [8,1]
     abacus_alpha = 1
     def __init__(self):
@@ -150,13 +151,11 @@ class EDA_method:
             _overlap = not np.any(self.matrix >= 2)
                 
             return all([_L,_R,_T,_B,_overlap])
-        def HPWL()->float:
-            _all_x = []
-            _all_y = []
+        def quality_factor()->float:
+            _all_vector = []
             for _block in self.block_list:
-                _all_x.append(_block.coordinate[0])
-                _all_y.append(_block.coordinate[1])
-            _output = (max(_all_x) - min(_all_x) + max(_all_y) - min(_all_y))/2
+                _all_vector.append(np.linalg.norm(_block.global_vector))
+            _output = np.average(_all_vector) + self.quality_alpha * max(_all_vector)
             return _output
         def global_vector()->float:
             _result = 0
@@ -307,7 +306,7 @@ class EDA_method:
                         break
             return _output
         _feasible = feasible()
-        _HPWL = HPWL()
+        _HPWL = quality_factor()
         _orig_coord = [_block.coordinate.copy() for _block in self.block_list]
         _global_vector = global_vector()
         self.HPWL_list.append(_HPWL)
@@ -400,7 +399,7 @@ class MatrixIterationVisualize(App):
             _output.add_widget(next_btn)
             return _output
         def __label_display0():
-            self.HPWL_label = Label(text = f"HPWL = {self.data_pack[self.step_count][0]:.4f}",
+            self.HPWL_label = Label(text = f"quality = {self.data_pack[self.step_count][0]:.4f}",
                                 font_name='chinese',
                                 font_size=self.font_size,
                                 size_hint=(None, None),
@@ -473,7 +472,7 @@ class MatrixIterationVisualize(App):
     
     def refresh_data(self):
         self.step_label.text = f"步數 = {self.step_count}/{len(self.mat_list)}"
-        self.HPWL_label.text = f"HPWL = {self.data_pack[self.step_count][0]:.4f}"
+        self.HPWL_label.text = f"quality = {self.data_pack[self.step_count][0]:.4f}"
         self.feasible_label.text = f"可行 = {self.data_pack[self.step_count][1]}"
         self.global_vector_label.text = f"全局距離 = {self.data_pack[self.step_count][2]:.2f}"
         _coord_text = ",".join([f"({_x:02d},{_y:02d})" for _x,_y in self.data_pack[self.step_count][3]])
