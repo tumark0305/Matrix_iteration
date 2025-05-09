@@ -26,6 +26,14 @@ class PIC:
         _data = _f.read()
         _f.close()
         return _data
+    def convert_tomatrix(self):
+        _output = np.zeros((self.col, self.row), dtype=np.uint8)
+        for _y in range(len(_output)):
+            for _x in range(len(_output[_y])):
+                for _block in self.block_list:
+                    if 0<= _x - _block.coordinate[0] < _block.size[0] and 0<=_y-_block.coordinate[1]<_block.size[1]:
+                        _output[_y][_x] +=1
+        return _output
     def run(self):
         return None
 

@@ -4,7 +4,7 @@
     <SchemaVersion>2.0</SchemaVersion>
     <ProjectGuid>bf365087-fc73-4578-bcbc-8fa722944ce1</ProjectGuid>
     <ProjectHome>.</ProjectHome>
-    <StartupFile>pa3.py</StartupFile>
+    <StartupFile>main.py</StartupFile>
     <SearchPath>
     </SearchPath>
     <WorkingDirectory>.</WorkingDirectory>
