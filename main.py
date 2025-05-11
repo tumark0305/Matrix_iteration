@@ -58,11 +58,8 @@ class PIC:
                         if _x == _line_coord[0] and _y == _line_coord[1]:
                             _output[_y][_x] +=1
         return _output
-    def loss(self):
-        _total_loss = 0
-        _wire_length = 0
-        _cross = 0
-        _bend = 0
+    def loss_cal_cross(self):
+        _output = 0
         for _i,_pin in enumerate(self.data.net_data):
             for _cmp_pin in self.data.net_data[_i+1:]:
                 for _patha in _pin.line_strip:
@@ -70,11 +67,14 @@ class PIC:
                         _eq_start = _patha[0][0] == _pathb[0][0] and _patha[0][1] == _pathb[0][1]
                         _eq_end = _patha[1][0] == _pathb[1][0] and _patha[1][1] == _pathb[1][1]
                         if _eq_start and _eq_end:#overlap
-                            _cross += 1
+                            _output += 1
                             pass
                         elif _eq_end:#corss
-                            _cross += 1
-            _wire_length += len(_pin.line_strip)
+                            _output += 1
+        return _output
+    def loss_cal_bend(self):
+        _output = 0
+        for _pin in self.data.net_data:
             _direction_overview = []
             _current_direction = "N"
             for _path in _pin.line_strip:
@@ -87,8 +87,18 @@ class PIC:
                     print("not a valid line")
                 _direction_overview.append(_next_direction)
                 if _current_direction != "N" and _current_direction != _next_direction:
-                    _bend += 1
+                    _output += 1
                 _current_direction = _next_direction
+        return _output
+    def loss_cal_length(self):
+        _output = 0
+        for _x in self.data.net_data:
+            _output += len(_x.line_strip)
+        return _output
+    def loss(self):
+        _wire_length = self.loss_cal_length()
+        _cross = self.loss_cal_cross()
+        _bend = self.loss_cal_bend()
         _total_loss = _wire_length * self.data.propagation_loss + _cross * self.data.crossing_loss + _bend * self.data.bending_loss
         self.data_pack.append([_total_loss,_wire_length,_cross,_bend])
         return None
