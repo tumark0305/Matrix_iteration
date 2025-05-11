@@ -19,6 +19,8 @@ class net_info:
         self.id = int(_line_text.split(' ')[0])
         self.pin_coordinate = np.array([[int(_line_text.split(' ')[1]),int(_line_text.split(' ')[2])],[int(_line_text.split(' ')[3]),int(_line_text.split(' ')[4])]])
         self.line_coordinate = []
+        self.line_strip = []
+        self.connected = False
 class header_info:
     def __init__(self,_input_text):
         self.grid = [int(_input_text.split('\n')[0].split(' ')[1]),int(_input_text.split('\n')[0].split(' ')[2])]
@@ -51,7 +53,7 @@ class PIC:
                 for _connection in self.data.net_data:
                     for _pin_coord in _connection.pin_coordinate:
                         if _x == _pin_coord[0] and _y == _pin_coord[1]:
-                            _output[_y][_x] = 50
+                            _output[_y][_x] += 50
                     for _line_coord in _connection.line_coordinate:
                         if _x == _line_coord[0] and _y == _line_coord[1]:
                             _output[_y][_x] +=1
@@ -61,16 +63,62 @@ class PIC:
         _wire_length = 0
         _cross = 0
         _bend = 0
+        for _i,_pin in enumerate(self.data.net_data):
+            for _cmp_pin in self.data.net_data[_i+1:]:
+                for _patha in _pin.line_strip:
+                    for _pathb in _cmp_pin.line_strip:
+                        _eq_start = _patha[0][0] == _pathb[0][0] and _patha[0][1] == _pathb[0][1]
+                        _eq_end = _patha[1][0] == _pathb[1][0] and _patha[1][1] == _pathb[1][1]
+                        if _eq_start and _eq_end:#overlap
+                            _cross += 1
+                            pass
+                        elif _eq_end:#corss
+                            _cross += 1
+            _wire_length += len(_pin.line_strip)
+            _direction_overview = []
+            _current_direction = "N"
+            for _path in _pin.line_strip:
+                _next_direction = "N"
+                if _path[0][0] == _path[1][0] :
+                    _next_direction = "Y"
+                elif _path[0][1] == _path[1][1] :
+                    _next_direction = "X"
+                else:
+                    print("not a valid line")
+                _direction_overview.append(_next_direction)
+                if _current_direction != "N" and _current_direction != _next_direction:
+                    _bend += 1
+                _current_direction = _next_direction
+        _total_loss = _wire_length * self.data.propagation_loss + _cross * self.data.crossing_loss + _bend * self.data.bending_loss
         self.data_pack.append([_total_loss,_wire_length,_cross,_bend])
         return None
     def direct_connect(self):
         for _pin in self.data.net_data:
-            for _wire_x in range(min(_pin.pin_coordinate.T[0])+1,max(_pin.pin_coordinate.T[0])):
+            _pin.connected = False
+            _pin.line_coordinate = []
+            _pin.line_strip = []
+            _current_coordinate = np.array([min(_pin.pin_coordinate.T[0]),min(_pin.pin_coordinate.T[1])])
+            for _wire_x in range(min(_pin.pin_coordinate.T[0]),max(_pin.pin_coordinate.T[0])+1):
                 _wire_y = min(_pin.pin_coordinate.T[1])
-                _pin.line_coordinate.append(np.array([_wire_x,_wire_y]))
-            for _wire_y in range(min(_pin.pin_coordinate.T[1])+1,max(_pin.pin_coordinate.T[1])):
+                _next_coordinate = np.array([_wire_x,_wire_y])
+                _eq_pin0 = _next_coordinate[0] == _pin.pin_coordinate[0][0] and _next_coordinate[1] == _pin.pin_coordinate[0][1]
+                _eq_pin1 = _next_coordinate[0] == _pin.pin_coordinate[1][0] and _next_coordinate[1] == _pin.pin_coordinate[1][1]
+                if  not(_eq_pin0 or _eq_pin1):
+                    _pin.line_coordinate.append(_next_coordinate)
+                if not(_next_coordinate[0] == _current_coordinate[0] and _next_coordinate[1] == _current_coordinate[1]):
+                    _pin.line_strip.append(np.array([_current_coordinate,_next_coordinate]))
+                _current_coordinate = _next_coordinate
+            for _wire_y in range(min(_pin.pin_coordinate.T[1]),max(_pin.pin_coordinate.T[1])+1):
                 _wire_x = max(_pin.pin_coordinate.T[0])
-                _pin.line_coordinate.append(np.array([_wire_x,_wire_y]))
+                _next_coordinate = np.array([_wire_x,_wire_y])
+                _eq_pin0 = _next_coordinate[0] == _pin.pin_coordinate[0][0] and _next_coordinate[1] == _pin.pin_coordinate[0][1]
+                _eq_pin1 = _next_coordinate[0] == _pin.pin_coordinate[1][0] and _next_coordinate[1] == _pin.pin_coordinate[1][1]
+                if  not(_eq_pin0 or _eq_pin1):
+                    _pin.line_coordinate.append(_next_coordinate)
+                if not(_next_coordinate[0] == _current_coordinate[0] and _next_coordinate[1] == _current_coordinate[1]):
+                    _pin.line_strip.append(np.array([_current_coordinate,_next_coordinate]))
+                _current_coordinate = _next_coordinate
+            _pin.connected = True
         return None
             
     def forward(self):
@@ -85,7 +133,7 @@ class MatrixIterationVisualize(App):
         self.data_pack = data_pack
         self.matrix = self.mat_list[0]
         self.col, self.row = self.matrix.shape
-        self.cell_width = 60   # 每格大概 6 字元寬
+        self.cell_width = 80   # 每格大概 6 字元寬60
         self.cell_height = 40  # 每格高度
         self.font_size = 24
         self.step_count = 0
