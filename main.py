@@ -107,7 +107,7 @@ class EDA_method:
         self.matrix = None
         self.all_matrix = []
         self.data_pack = []
-        self.block_count = 35
+        self.block_count = 30
         self.HPWL_list = []
         self.feasible_list = []
         self.all_global_vector_list = []
@@ -319,21 +319,11 @@ class EDA_method:
                 self.block_list[_x].new_coordinate = _all_coord[_x]
         return None
     def forward(self):
-        _block_list_copy = [copy.deepcopy(_block) for _block in self.block_list]
         for _ in range(10):
             [_block.teleport() for _block in self.block_list]
             self.matrix = self.convert_tomatrix()
             self.all_matrix.append(self.matrix.copy())
             self.loss("abacus")
-
-        self.block_list = _block_list_copy
-        for _ in range(10):
-            [_block.move() for _block in self.block_list]
-            self.matrix = self.convert_tomatrix()
-            self.all_matrix.append(self.matrix.copy())
-            self.loss("spring")
-            if self.feasible_list[-1] :
-                break
         return None
 
 class MatrixIterationVisualize(App):
