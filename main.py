@@ -134,6 +134,8 @@ class EDA_method:
                     if 0<= _x - _block.coordinate[0] < _block.size[0] and 0<=_y-_block.coordinate[1]<_block.size[1]:
                         _output[_y][_x] +=1
         return _output
+    def abacus(_block_list:list[block_info])->list[block_info]:
+        return _output
     def loss(self,_method:str):
         assert _method in ["spring" , "abacus"]
         def feasible()->bool:
